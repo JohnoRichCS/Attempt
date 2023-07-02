@@ -1,0 +1,70 @@
+from bs4 import BeautifulSoup as bs
+import pandas as pd
+import requests
+
+# Set the URL of the Yelp page for the restaurant
+restaurant_url = 'https://www.yelp.com/biz/gelati-celesti-virginia-beach-2'
+
+# Set the headers for the HTTP request
+headers = {
+    'host': 'www.yelp.com'
+}
+
+# Use BeautifulSoup to parse the restaurant page HTML
+restaurant_page = bs(requests.get(restaurant_url, headers=headers).text, 'lxml')
+
+# Extract the unique Yelp business ID for the restaurant
+biz_id = restaurant_page.find('meta', {'name': 'yelp-biz-id'}).get('content')
+
+# Extract the total number of reviews for the restaurant
+review_count = int(restaurant_page.find('a', {'href': '#reviews'}).text.split(' ')[0])
+
+# Create an empty list to store the review data
+data = []
+
+# Iterate through each review page (10 reviews per page)
+for review_page in range(0, review_count, 10):
+    # Construct the API URL to fetch reviews for the given page
+    review_api_url = f'https://www.yelp.com/biz/{biz_id}/review_feed?rl=en&q=&sort_by=relevance_desc&start={review_page}'
+
+    # Send a request to the review API and get the JSON response
+    review_data = requests.get(review_api_url, headers=headers).json()
+
+    # Iterate through each review in the response
+    for review in review_data['reviews']:
+        # Append the extracted data as a dictionary to the 'data' list
+        user_id = review['userId']  # Extract the User ID
+
+        # Fetch additional columns of data on the review poster
+        user_profile_url = f"https://www.yelp.com/user_details?userid={user_id}"
+        user_profile_page = bs(requests.get(user_profile_url, headers=headers).text, 'lxml')
+        user_additional_data = user_profile_page.find('div', {'class': 'user-details-overview_sidebar'})
+
+        # Extract the desired additional columns of data
+        user_join_date = user_additional_data.find('span', {'class': 'yelping-since'}).text.strip()
+
+        # Append the extracted data as a dictionary to the 'data' list
+        data.append({
+            'Review Text': review['comment']['text'],
+            'Rating': review['rating'],
+            'Date': review['localizedDate'],
+            'User ID': user_id,
+            'User Name': review['user']['markupDisplayName'],
+            'User Profile URL': 'https://www.yelp.com/' + review['user']['link'],
+            'Yelping Since': user_join_date,  # Additional column: Yelping Since (User Join Date)
+            'User Friend Count': user_additional_data.find('li', {'class': 'friend-count'}).find('b').text,
+            'User Review Count': user_additional_data.find('li', {'class': 'review-count'}).find('b').text,
+            'Elite Year': review['user']['eliteYear'] if 'eliteYear' in review['user'] else '',
+            'Feedback Useful': review['feedback']['counts']['useful'],
+            'Feedback Funny': review['feedback']['counts']['funny'],
+            'Feedback Cool': review['feedback']['counts']['cool'],
+        })
+
+        # Print the last added review data
+        print(data[-1])
+
+# Create a DataFrame from the collected review data
+df = pd.DataFrame(data)
+
+# Save the DataFrame as a CSV file
+df.to_csv('Yelp Reviews.csv', index=None)
